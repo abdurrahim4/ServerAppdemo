@@ -1,4 +1,3 @@
-import {sendNewOrderPush} from './orderPush.js';
 import {awardLoyaltyForDeliveredOrder} from '../customerAccounts.js';
 import crypto from 'node:crypto';
 import {list,mutate,storageMode,findRecord,insertRecord,updateOrderRecord,v2db,startV2Session} from '../repositories/jsonStore.js';
@@ -44,7 +43,7 @@ export async function createOrder(body,io){
  const now=new Date().toISOString();
  const deliveryFee=Number(body.delivery?.deliveryFee||0);
  const finalTotal=money(total+deliveryFee);
- const order={id:`DKB-${crypto.randomUUID()}`,branchId:body.branchId,customer:{name:body.customer.name.trim(),phone:body.customer.phone.trim(),address:body.customer.address.trim()},items,subtotal,vatTotal,deliveryFee,deliveryDistanceKm:body.delivery?.distanceKm||null,deliveryPromotion:body.delivery?.promotion||null,total:finalTotal,currency:'PLN',customerId:body.customerId||null,paymentMethod:body.paymentMethod,status:'new',createdAt:now,updatedAt:now,history:[{status:'new',at:now}],cancellationReason:null};
+ const order={id:`DKB-${crypto.randomUUID()}`,branchId:body.branchId,customer:{name:body.customer.name.trim(),phone:body.customer.phone.trim(),address:body.customer.address.trim(),...(body.customer.email?{email:body.customer.email}:{}),...(body.customer.username?{username:body.customer.username}:{}),...(body.customer.mailingAddress?{mailingAddress:body.customer.mailingAddress}:{})},...(body.deliveryInstructions?{deliveryInstructions:body.deliveryInstructions}:{}),items,subtotal,vatTotal,deliveryFee,deliveryDistanceKm:body.delivery?.distanceKm||null,deliveryPromotion:body.delivery?.promotion||null,total:finalTotal,currency:'PLN',customerId:body.customerId||null,paymentMethod:body.paymentMethod,status:'new',createdAt:now,updatedAt:now,history:[{status:'new',at:now}],cancellationReason:null};
  const record=storageMode()==='mongodb-v2' ? await (async()=>{
   // Reward and order are committed atomically. A failed order cannot consume a reward.
   if(body.redeemReward && body.customerId){
@@ -86,10 +85,7 @@ export async function createOrder(body,io){
   if(body.idempotencyKey){const existing=rows.find(x=>x.idempotencyKey===body.idempotencyKey&&x.branchId===body.branchId);if(existing)return {order:existing,created:false};}
   order.idempotencyKey=body.idempotencyKey||null;rows.push(order);return {order,created:true};
  });
- if(record.created){ io.to(`branch:${body.branchId}`).emit('order:new',{eventId:crypto.randomUUID(),order:record.order});
-  // Fire after successful order commit; never delay checkout for external push service.
-  void sendNewOrderPush(body.branchId,record.order.id);
- }
+ if(record.created) io.to(`branch:${body.branchId}`).emit('order:new',{eventId:crypto.randomUUID(),order:record.order});
  return record;
 }
 const transitions={new:['preparing','cancelled'],preparing:['delivering','cancelled'],delivering:['delivered'],delivered:[],cancelled:[]};

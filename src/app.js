@@ -10,7 +10,6 @@ import {z} from 'zod';
 import {list,mutate,createBranchAndEmployee,getOrderPage,findRecord,getDeliverySettings,saveDeliverySettings,getPromotionsForBranch,getDeliveryPromotionsAdmin,createDeliveryPromotion,patchDeliveryPromotion,deleteDeliveryPromotion,getActiveDeliveryBranches,v2db} from './repositories/jsonStore.js';
 import {auth,access,manager,tokenFor} from './middleware/auth.js';
 import {createOrder,changeStatus,OrderError} from './services/orders.js';
-import {registerOrderPush,unregisterOrderPush} from './services/orderPush.js';
 import {quoteDelivery,verifyDeliveryQuote,trackingToken,verifyTrackingToken,nearestBranches} from './services/delivery.js';
 const wrap=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 const fail=(status,message)=>{throw new OrderError(message,status);};
@@ -20,7 +19,7 @@ const productSchema=z.object({name:z.record(z.string()).refine(o=>!!o.pl||!!o.en
 const groupSchema=z.object({name:text,min:z.number().int().min(0).max(30),max:z.number().int().min(1).max(30),options:z.array(z.object({id:z.string().min(1).max(100),name:text,price:z.number().finite().min(0).max(100000),available:z.boolean().default(true)})).min(1).max(60)}).refine(x=>x.min<=x.max&&x.max<=x.options.length,{message:'Invalid selection limits'});
 const vatRate=z.number().finite().min(0).max(100);
 const categorySchema=z.object({id:z.string().trim().min(1).max(70).regex(/^[a-z0-9_-]+$/),name:z.object({pl:text,en:z.string().max(250).optional()}),vatRate:vatRate.default(0),sortOrder:z.number().int().default(0)});
-const orderSchema=z.object({branchId:text,customer:z.object({name:text,phone:text,address:text}),items:z.array(z.object({productId:text,size:z.enum(['small','medium','large']).optional(),quantity:z.number().int().min(1).max(30),selections:z.record(z.array(z.string())).optional(),instructions:z.string().max(500).optional()})).min(1).max(40),paymentMethod:z.enum(['cash_on_delivery','card_on_delivery']),idempotencyKey:z.string().min(8).max(120).optional(),redeemReward:z.boolean().optional(),redeemRewardCount:z.number().int().min(1).max(100).optional(),deliveryQuoteToken:z.string().min(12).optional()});
+const orderSchema=z.object({branchId:text,customer:z.object({name:text,phone:text,address:text,email:z.string().trim().email().max(254).optional(),username:z.string().trim().max(100).optional(),mailingAddress:z.string().trim().max(500).optional()}),deliveryInstructions:z.string().trim().max(1000).optional(),items:z.array(z.object({productId:text,size:z.enum(['small','medium','large']).optional(),quantity:z.number().int().min(1).max(30),selections:z.record(z.array(z.string())).optional(),instructions:z.string().max(500).optional()})).min(1).max(40),paymentMethod:z.enum(['cash_on_delivery','card_on_delivery']),idempotencyKey:z.string().min(8).max(120).optional(),redeemReward:z.boolean().optional(),redeemRewardCount:z.number().int().min(1).max(100).optional(),deliveryQuoteToken:z.string().min(12).optional()});
 const settingsSchema=z.object({available:z.boolean().optional(),hours:z.object({open:z.string().regex(/^\d\d:\d\d$/),close:z.string().regex(/^\d\d:\d\d$/)}).optional(),phone:z.string().max(40).optional()});
 async function validateProductGroups(ids,branchId){if(new Set(ids).size!==ids.length)fail(400,'Duplicate customization group');const groups=await list('customization-groups');for(const id of ids){if(!groups.some(g=>g.id===id&&(g.global===true||g.branchId===branchId)))fail(400,'Invalid customization group for branch');}}
 export function createApp(io){
@@ -133,8 +132,6 @@ export function createApp(io){
    res.json({data:{updated:true}});
  }));
 
- app.post('/api/v1/management/push-tokens',auth,wrap(async(req,res)=>res.json({data:await registerOrderPush(req.user,req.body)})));
- app.delete('/api/v1/management/push-tokens',auth,wrap(async(req,res)=>res.json({data:await unregisterOrderPush(req.user,req.body)})));
  const branch='/api/v1/management/branches/:branchId';app.use(branch,auth,access);
  app.get(branch+'/orders',wrap(async(req,res)=>{res.json(await getOrderPage(req.params.branchId,{status:req.query.status,limit:Math.min(100,Math.max(1,Number(req.query.limit)||20)),offset:Math.max(0,Number(req.query.offset)||0)}));}));
  // Super Admin only: permanent removal. Target one indexed record, never scan all orders.
@@ -152,19 +149,6 @@ export function createApp(io){
    }
    io.to(`branch:${branchId}`).emit('order:updated',{eventId:crypto.randomUUID(),orderId,deleted:true});
    res.json({data:{deleted:true}});
- }));
- app.patch(branch+'/orders/:orderId/estimate',wrap(async(req,res)=>{
-  const {minutes}=z.object({minutes:z.number().int().min(5).max(180)}).parse(req.body);
-  const branchId=req.params.branchId,id=req.params.orderId,now=new Date().toISOString();
-  let updated;
-  if(storageMode()==='mongodb-v2'){
-    const db=await v2db();const result=await db.collection('orders').findOneAndUpdate({id,branchId,status:'new'},{$set:{status:'preparing',estimatedMinutes:minutes,updatedAt:now},$push:{history:{status:'preparing',at:now,estimatedMinutes:minutes}}},{returnDocument:'after',projection:{_id:0}});
-    updated=result?.value??result;
-    if(!updated?.id)fail(409,'Order is no longer awaiting acceptance');
-  }else{
-    updated=await mutate('orders',rows=>{const order=rows.find(o=>o.id===id&&o.branchId===branchId);if(!order||order.status!=='new')fail(409,'Order is no longer awaiting acceptance');order.status='preparing';order.estimatedMinutes=minutes;order.updatedAt=now;order.history.push({status:'preparing',at:now,estimatedMinutes:minutes});return structuredClone(order)});
-  }
-  io.to(`branch:${branchId}`).emit('order:updated',{eventId:crypto.randomUUID(),order:updated});res.json({data:updated});
  }));
  app.patch(branch+'/orders/:orderId/status',wrap(async(req,res)=>{const {status,reason}=z.object({status:z.enum(['preparing','delivering','delivered','cancelled']),reason:z.string().max(500).optional()}).parse(req.body);res.json({data:await changeStatus(req.params.branchId,req.params.orderId,status,reason,io)});}));
  app.get(branch+'/products',wrap(async(req,res)=>{let rows=(await list('products')).filter(p=>p.branchId===req.params.branchId);if(req.query.search)rows=rows.filter(p=>Object.values(p.name).join(' ').toLowerCase().includes(String(req.query.search).toLowerCase()));if(req.query.archived!==undefined)rows=rows.filter(p=>p.archived===(req.query.archived==='true'));res.json(page(rows,req));}));
