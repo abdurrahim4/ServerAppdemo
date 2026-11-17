@@ -150,6 +150,35 @@ export function createApp(io){
    io.to(`branch:${branchId}`).emit('order:updated',{eventId:crypto.randomUUID(),orderId,deleted:true});
    res.json({data:{deleted:true}});
  }));
+ // Accept a new order and persist its preparation estimate in one atomic transition.
+ app.patch(branch+'/orders/:orderId/estimate',wrap(async(req,res)=>{
+   const {minutes}=z.object({minutes:z.number().int().min(1).max(240)}).parse(req.body);
+   const {branchId,orderId}=req.params;
+   const at=new Date().toISOString();
+   let updated;
+   if(storageMode()==='mongodb-v2'){
+     const db=await v2db();
+     updated=await db.collection('orders').findOneAndUpdate(
+       {id:orderId,branchId,status:'new'},
+       {$set:{status:'preparing',estimatedMinutes:minutes,preparationStartedAt:at,updatedAt:at},$push:{history:{status:'preparing',at,estimatedMinutes:minutes}}},
+       {returnDocument:'after',projection:{_id:0}}
+     );
+   }else{
+     updated=await mutate('orders',rows=>{
+       const order=rows.find(o=>o.id===orderId&&o.branchId===branchId&&o.status==='new');
+       if(!order)return null;
+       order.status='preparing';order.estimatedMinutes=minutes;order.preparationStartedAt=at;order.updatedAt=at;
+       (order.history??=[]).push({status:'preparing',at,estimatedMinutes:minutes});
+       return structuredClone(order);
+     });
+   }
+   if(!updated){
+     const existing=await findRecord('orders',{id:orderId,branchId});
+     fail(existing?409:404,existing?'Order is no longer new':'Order not found');
+   }
+   io.to(`branch:${branchId}`).emit('order:updated',{eventId:crypto.randomUUID(),order:updated});
+   res.json({data:updated});
+ }));
  app.patch(branch+'/orders/:orderId/status',wrap(async(req,res)=>{const {status,reason}=z.object({status:z.enum(['preparing','delivering','delivered','cancelled']),reason:z.string().max(500).optional()}).parse(req.body);res.json({data:await changeStatus(req.params.branchId,req.params.orderId,status,reason,io)});}));
  app.get(branch+'/products',wrap(async(req,res)=>{let rows=(await list('products')).filter(p=>p.branchId===req.params.branchId);if(req.query.search)rows=rows.filter(p=>Object.values(p.name).join(' ').toLowerCase().includes(String(req.query.search).toLowerCase()));if(req.query.archived!==undefined)rows=rows.filter(p=>p.archived===(req.query.archived==='true'));res.json(page(rows,req));}));
  app.post(branch+'/products',manager,wrap(async(req,res)=>{const body=productSchema.parse(req.body);if(!(await list('categories')).some(c=>c.id===body.categoryId))fail(400,'Create the category first');await validateProductGroups(body.customizationGroupIds,req.params.branchId);const p={...body,id:crypto.randomUUID(),branchId:req.params.branchId,currency:'PLN',archived:false};await mutate('products',rows=>rows.push(p));res.status(201).json({data:p});}));
