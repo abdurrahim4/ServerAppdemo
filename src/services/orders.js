@@ -1,5 +1,6 @@
 import {awardLoyaltyForDeliveredOrder} from '../customerAccounts.js';
 import crypto from 'node:crypto';
+import {sendNewOrderPush} from './orderPush.js';
 import {list,mutate,storageMode,findRecord,insertRecord,updateOrderRecord,v2db,startV2Session} from '../repositories/jsonStore.js';
 const money=n=>Math.round((n+Number.EPSILON)*100)/100;
 const extraSizeSurcharge=(groups,selections,size)=>{const group=groups.find(g=>/^(size|rozmiar|wielkość|rozmiary)$/i.test(String(g.id))||/size|rozmiar|wielkość/i.test(String(g.name)));const chosen=group?.options?.find(o=>(selections?.[group.id]||[]).includes(o.id));const name=String(chosen?.name||chosen?.id||'').toLowerCase();return /mega|large|duż|duz|big/.test(name)?2:/medium|śred|sred|mid/.test(name)?1:size==='large'||size==='mega'?2:size==='medium'?1:0};
@@ -85,7 +86,13 @@ export async function createOrder(body,io){
   if(body.idempotencyKey){const existing=rows.find(x=>x.idempotencyKey===body.idempotencyKey&&x.branchId===body.branchId);if(existing)return {order:existing,created:false};}
   order.idempotencyKey=body.idempotencyKey||null;rows.push(order);return {order,created:true};
  });
- if(record.created) io.to(`branch:${body.branchId}`).emit('order:new',{eventId:crypto.randomUUID(),order:record.order});
+ if(record.created){
+  io.to(`branch:${body.branchId}`).emit('order:new',{eventId:crypto.randomUUID(),order:record.order});
+  // Best-effort notification: never block checkout or alter order status.
+  void sendNewOrderPush(body.branchId,record.order.id).catch(err=>{
+    console.error('New-order push dispatch failed:',err.message);
+  });
+ }
  return record;
 }
 const transitions={new:['preparing','cancelled'],preparing:['delivering','cancelled'],delivering:['delivered'],delivered:[],cancelled:[]};
