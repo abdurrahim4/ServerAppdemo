@@ -10,6 +10,7 @@ import {z} from 'zod';
 import {list,mutate,createBranchAndEmployee,getOrderPage,findRecord,getDeliverySettings,saveDeliverySettings,getPromotionsForBranch,getDeliveryPromotionsAdmin,createDeliveryPromotion,patchDeliveryPromotion,deleteDeliveryPromotion,getActiveDeliveryBranches,v2db} from './repositories/jsonStore.js';
 import {auth,access,manager,tokenFor} from './middleware/auth.js';
 import {createOrder,changeStatus,OrderError} from './services/orders.js';
+import {registerOrderPush,unregisterOrderPush} from './services/orderPush.js';
 import {quoteDelivery,verifyDeliveryQuote,trackingToken,verifyTrackingToken,nearestBranches} from './services/delivery.js';
 const wrap=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 const fail=(status,message)=>{throw new OrderError(message,status);};
@@ -130,6 +131,21 @@ export function createApp(io){
    const hash=await bcrypt.hash(password,12);
    await mutate('users',rows=>{const u=rows.find(x=>x.id===req.params.employeeId&&x.branchIds?.includes(req.params.branchId));if(!u)fail(404,'Employee not found');u.passwordHash=hash});
    res.json({data:{updated:true}});
+ }));
+
+ // Register/unregister Expo push tokens for authenticated order-management employees.
+ const pushTokenPath='/api/v1/management/push-tokens';
+ app.post(pushTokenPath,auth,wrap(async(req,res)=>{
+   const body=z.object({
+     token:z.string().min(1).max(256),
+     branchId:z.string().min(1).max(250)
+   }).parse(req.body);
+   res.json({data:await registerOrderPush(req.user,body)});
+ }));
+ app.delete(pushTokenPath,auth,wrap(async(req,res)=>{
+   const body=z.object({branchId:z.string().min(1).max(250)}).parse(req.body);
+   if(req.user.role!=='super_admin'&&!req.user.branchIds.includes(body.branchId))fail(403,'Branch access denied');
+   res.json({data:await unregisterOrderPush(req.user,body)});
  }));
 
  const branch='/api/v1/management/branches/:branchId';app.use(branch,auth,access);
