@@ -9,6 +9,6 @@ export async function unregisterOrderPush(user,body){const branchId=String(body?
 let pending=0;
 export async function sendNewOrderPush(branchId,orderId){if(storageMode()!=='mongodb-v2'||pending>=5)return;pending++;
  try{const col=await collection();const rows=await col.find({branchId,active:true},{projection:{token:1,_id:0}}).limit(200).toArray();
- for(let i=0;i<rows.length;i+=100){const messages=rows.slice(i,i+100).map(({token})=>({to:token,title:'Delta Kebab · New order',body:'A new order is waiting for acceptance',sound:'default',priority:'high',channelId:'orders',data:{orderId,branchId}}));
+ for(let i=0;i<rows.length;i+=100){const messages=rows.slice(i,i+100).map(({token})=>({to:token,title:'Delta Kebab · New order',body:'A new order is waiting for acceptance',sound:'urgent_order.wav',priority:'high',channelId:'urgent-orders-v2',data:{orderId,branchId}}));
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),4000);try{const res=await fetch('https://exp.host/--/api/v2/push/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(messages),signal:controller.signal});if(!res.ok)console.error('Expo push status:',res.status);}finally{clearTimeout(timeout)}}
  }catch(err){console.error('Order push dispatch failed:',err.message)}finally{pending--}}
