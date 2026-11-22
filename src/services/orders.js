@@ -49,9 +49,9 @@ export async function priceOrder(body) {
 export async function createOrder(body,io){
  const {items,subtotal,vatTotal,total}=await priceOrder(body);
  const now=new Date().toISOString();
- const deliveryFee=Number(body.delivery?.deliveryFee||0);
+ const deliveryFee=body.orderType==='pickup'?0:Number(body.delivery?.deliveryFee||0);
  const finalTotal=money(total+deliveryFee);
- const order={id:`DKB-${crypto.randomUUID()}`,branchId:body.branchId,customer:{name:body.customer.name.trim(),phone:body.customer.phone.trim(),address:body.customer.address.trim(),...(body.customer.email?{email:body.customer.email}:{}),...(body.customer.username?{username:body.customer.username}:{}),...(body.customer.mailingAddress?{mailingAddress:body.customer.mailingAddress}:{})},...(body.deliveryInstructions?{deliveryInstructions:body.deliveryInstructions}:{}),items,subtotal,vatTotal,deliveryFee,deliveryDistanceKm:body.delivery?.distanceKm||null,deliveryPromotion:body.delivery?.promotion||null,total:finalTotal,currency:'PLN',customerId:body.customerId||null,paymentMethod:body.paymentMethod,status:'new',createdAt:now,updatedAt:now,history:[{status:'new',at:now}],cancellationReason:null};
+ const order={id:`DKB-${crypto.randomUUID()}`,orderType:body.orderType==='pickup'?'pickup':'delivery',branchId:body.branchId,customer:{name:body.customer.name.trim(),phone:body.customer.phone.trim(),address:String(body.customer.address||'').trim(),...(body.customer.email?{email:body.customer.email}:{}),...(body.customer.username?{username:body.customer.username}:{}),...(body.customer.mailingAddress?{mailingAddress:body.customer.mailingAddress}:{})},...(body.deliveryInstructions?{deliveryInstructions:body.deliveryInstructions}:{}),items,subtotal,vatTotal,deliveryFee,deliveryDistanceKm:body.orderType==='pickup'?null:(body.delivery?.distanceKm||null),deliveryPromotion:body.delivery?.promotion||null,total:finalTotal,currency:'PLN',customerId:body.customerId||null,paymentMethod:body.paymentMethod,status:'new',createdAt:now,updatedAt:now,history:[{status:'new',at:now}],cancellationReason:null};
  const record=storageMode()==='mongodb-v2' ? await (async()=>{
   // Reward and order are committed atomically. A failed order cannot consume a reward.
   if(body.redeemReward && body.customerId){
