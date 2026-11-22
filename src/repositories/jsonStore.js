@@ -32,7 +32,7 @@ async function mongoCollection() {
 }
 
 export async function initStorage() {
-  if (mode === 'mongodb_v2') { const db=await mongoCollection(); for(const name of allowed) await db.collection(name).createIndex({id:1},{unique:true}); await db.collection('delivery-promotions').createIndex({enabled:1,startAt:1,endAt:1}); await db.collection('delivery-promotions').createIndex({enabled:1,branchIds:1,endAt:1}); await db.collection('branches').createIndex({available:1,deletedAt:1}); await db.collection('orders').createIndex({branchId:1,status:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,idempotencyKey:1},{unique:true,partialFilterExpression:{idempotencyKey:{$type:'string'}}}); return; }
+  if (mode === 'mongodb_v2') { const db=await mongoCollection(); for(const name of allowed) await db.collection(name).createIndex({id:1},{unique:true}); await db.collection('delivery-promotions').createIndex({enabled:1,startAt:1,endAt:1}); await db.collection('delivery-promotions').createIndex({enabled:1,branchIds:1,endAt:1}); await db.collection('branches').createIndex({available:1,deletedAt:1}); await db.collection('orders').createIndex({orderNumber:1},{unique:true,partialFilterExpression:{orderNumber:{$type:'string'}}}); await db.collection('orders').createIndex({branchId:1,status:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,idempotencyKey:1},{unique:true,partialFilterExpression:{idempotencyKey:{$type:'string'}}}); return; }
   if (mode !== 'mongodb') return;
   const collection = await mongoCollection();
   for (const name of allowed) {

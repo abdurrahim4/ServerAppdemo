@@ -4,6 +4,13 @@ import {sendNewOrderPush} from './orderPush.js';
 import {list,mutate,storageMode,findRecord,insertRecord,updateOrderRecord,v2db,startV2Session} from '../repositories/jsonStore.js';
 const money=n=>Math.round((n+Number.EPSILON)*100)/100;
 const extraSizeSurcharge=(groups,selections,size)=>{const group=groups.find(g=>/^(size|rozmiar|wielkość|rozmiary)$/i.test(String(g.id))||/size|rozmiar|wielkość/i.test(String(g.name)));const chosen=group?.options?.find(o=>(selections?.[group.id]||[]).includes(o.id));const name=String(chosen?.name||chosen?.id||'').toLowerCase();return /mega|large|duż|duz|big/.test(name)?2:/medium|śred|sred|mid/.test(name)?1:size==='large'||size==='mega'?2:size==='medium'?1:0};
+// Public-facing order numbers; internal UUID IDs remain unchanged.
+const displayOrderNumber = sequence => `DKB-${String(sequence).padStart(2,'0')}`;
+async function allocateMongoOrderNumber(db, session) {
+ const result=await db.collection('order-counters').findOneAndUpdate(
+  {_id:'global-orders'}, {$inc:{sequence:1}}, {upsert:true,returnDocument:'after',...(session?{session}:{})});
+ return displayOrderNumber(result.sequence);
+}
 export class OrderError extends Error { constructor(message,status=400){super(message);this.status=status;} }
 export async function priceOrder(body) {
  const branches=await list('branches');
@@ -72,6 +79,7 @@ export async function createOrder(body,io){
      if(update.modifiedCount!==ids.length)throw new OrderError('Reward balance changed; please retry',409);
      order.rewardDiscount=money(discountCents/100);order.redeemedRewardIds=ids;
      order.total=money(finalTotal-order.rewardDiscount);
+     order.orderNumber=await allocateMongoOrderNumber(db,session);
      await db.collection('orders').insertOne(order,{session});created={order,created:true};
     });return created;
    }catch(e){if(e.code===11000&&body.idempotencyKey){const existing=await findRecord('orders',{branchId:body.branchId,idempotencyKey:body.idempotencyKey});if(existing)return {order:existing,created:false}}throw e}
@@ -80,10 +88,13 @@ export async function createOrder(body,io){
 
   order.idempotencyKey=body.idempotencyKey||null;
   if(order.idempotencyKey){const existing=await findRecord('orders',{branchId:body.branchId,idempotencyKey:order.idempotencyKey});if(existing)return {order:existing,created:false};}
-  try {await insertRecord('orders',order);return {order,created:true};}
+  try {order.orderNumber=await allocateMongoOrderNumber(await v2db());await insertRecord('orders',order);return {order,created:true};}
   catch(err){if(err.code===11000&&order.idempotencyKey){const existing=await findRecord('orders',{branchId:body.branchId,idempotencyKey:order.idempotencyKey});if(existing)return {order:existing,created:false};}throw err;}
  })() : await mutate('orders',rows=>{
   if(body.idempotencyKey){const existing=rows.find(x=>x.idempotencyKey===body.idempotencyKey&&x.branchId===body.branchId);if(existing)return {order:existing,created:false};}
+  // Legacy JSON/collection mode: mutate serializes order creation.
+  const highest=rows.reduce((max,row)=>Math.max(max,Number(/^DKB-(\d+)$/.exec(row.orderNumber||'')?.[1]||0)),0);
+  order.orderNumber=displayOrderNumber(highest+1);
   order.idempotencyKey=body.idempotencyKey||null;rows.push(order);return {order,created:true};
  });
  if(record.created){
