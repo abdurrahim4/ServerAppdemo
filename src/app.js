@@ -1,3 +1,4 @@
+import {adminPushConfig,registerAdminPush,unregisterAdminPush} from './services/adminPush.js';
 import {storageMode} from './repositories/jsonStore.js';
 import customerAccounts,{resolveCustomerFromBearer} from './customerAccounts.js';
 import express from 'express';
@@ -142,6 +143,10 @@ export function createApp(io){
    res.json({data:{updated:true}});
  }));
 
+ const adminPushPath='/api/v1/management/admin-push';
+ app.get(adminPushPath,auth,onlySuper,(_req,res)=>res.json({data:adminPushConfig()}));
+ app.post(adminPushPath,auth,onlySuper,wrap(async(req,res)=>res.json({data:await registerAdminPush(req.user,req.body)})));
+ app.delete(adminPushPath,auth,onlySuper,wrap(async(req,res)=>res.json({data:await unregisterAdminPush(req.user,req.body)})));
  // Register/unregister Expo push tokens for authenticated order-management employees.
  const pushTokenPath='/api/v1/management/push-tokens';
  app.post(pushTokenPath,auth,wrap(async(req,res)=>{
@@ -157,6 +162,7 @@ export function createApp(io){
    res.json({data:await unregisterOrderPush(req.user,body)});
  }));
 
+ app.get('/api/v1/management/orders',auth,onlySuper,wrap(async(req,res)=>{res.json(await getOrderPage(null,{status:req.query.status,limit:Math.min(100,Math.max(1,Number(req.query.limit)||30)),offset:Math.max(0,Number(req.query.offset)||0)}));}));
  const branch='/api/v1/management/branches/:branchId';app.use(branch,auth,access);
  app.get(branch+'/orders',wrap(async(req,res)=>{res.json(await getOrderPage(req.params.branchId,{status:req.query.status,limit:Math.min(100,Math.max(1,Number(req.query.limit)||20)),offset:Math.max(0,Number(req.query.offset)||0)}));}));
  // Super Admin only: permanent removal. Target one indexed record, never scan all orders.

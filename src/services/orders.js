@@ -1,3 +1,4 @@
+import {sendAdminPush} from './adminPush.js';
 import {awardLoyaltyForDeliveredOrder} from '../customerAccounts.js';
 import crypto from 'node:crypto';
 import {sendNewOrderPush} from './orderPush.js';
@@ -100,6 +101,7 @@ export async function createOrder(body,io){
  if(record.created){
   io.to(`branch:${body.branchId}`).emit('order:new',{eventId:crypto.randomUUID(),order:record.order});
   // Best-effort notification: never block checkout or alter order status.
+  void sendAdminPush(body.branchId,record.order.id);
   void sendNewOrderPush(body.branchId,record.order.id).catch(err=>{
     console.error('New-order push dispatch failed:',err.message);
   });

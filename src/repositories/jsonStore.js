@@ -32,7 +32,7 @@ async function mongoCollection() {
 }
 
 export async function initStorage() {
-  if (mode === 'mongodb_v2') { const db=await mongoCollection(); for(const name of allowed) await db.collection(name).createIndex({id:1},{unique:true}); await db.collection('delivery-promotions').createIndex({enabled:1,startAt:1,endAt:1}); await db.collection('delivery-promotions').createIndex({enabled:1,branchIds:1,endAt:1}); await db.collection('branches').createIndex({available:1,deletedAt:1}); await db.collection('orders').createIndex({orderNumber:1},{unique:true,partialFilterExpression:{orderNumber:{$type:'string'}}}); await db.collection('orders').createIndex({branchId:1,status:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,idempotencyKey:1},{unique:true,partialFilterExpression:{idempotencyKey:{$type:'string'}}}); return; }
+  if (mode === 'mongodb_v2') { const db=await mongoCollection(); for(const name of allowed) await db.collection(name).createIndex({id:1},{unique:true}); await db.collection('delivery-promotions').createIndex({enabled:1,startAt:1,endAt:1}); await db.collection('delivery-promotions').createIndex({enabled:1,branchIds:1,endAt:1}); await db.collection('branches').createIndex({available:1,deletedAt:1}); await db.collection('orders').createIndex({orderNumber:1},{unique:true,partialFilterExpression:{orderNumber:{$type:'string'}}}); await db.collection('orders').createIndex({status:1,createdAt:-1,id:-1}); await db.collection('orders').createIndex({createdAt:-1,id:-1}); await db.collection('orders').createIndex({branchId:1,status:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,createdAt:-1}); await db.collection('orders').createIndex({branchId:1,idempotencyKey:1},{unique:true,partialFilterExpression:{idempotencyKey:{$type:'string'}}}); return; }
   if (mode !== 'mongodb') return;
   const collection = await mongoCollection();
   for (const name of allowed) {
@@ -141,8 +141,8 @@ export async function updateOrderRecord(branchId,id,oldStatus,patch) {
  const db=await mongoCollection();const result=await db.collection('orders').findOneAndUpdate({id,branchId,status:oldStatus},{$set:{status:patch.status,updatedAt:patch.updatedAt,cancellationReason:patch.cancellationReason},$push:{history:patch.historyEntry}},{returnDocument:'after',projection:{_id:0}});return result;
 }
 export async function getOrderPage(branchId,{status,limit=20,offset=0}={}){
- if(mode!=='mongodb_v2'){let rows=(await list('orders')).filter(o=>o.branchId===branchId&&(!status||o.status===status)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return {data:rows.slice(offset,offset+limit),pagination:{total:rows.length,limit,offset}};}
- const db=await mongoCollection();const filter={branchId,...(status?{status}:{})};const col=db.collection('orders');
+ if(mode!=='mongodb_v2'){let rows=(await list('orders')).filter(o=>(branchId===null||o.branchId===branchId)&&(!status||o.status===status)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));return {data:rows.slice(offset,offset+limit),pagination:{total:rows.length,limit,offset}};}
+ const db=await mongoCollection();const filter={...(branchId===null?{}:{branchId}),...(status?{status}:{})};const col=db.collection('orders');
  const [data,total]=await Promise.all([col.find(filter,{projection:{_id:0}}).sort({createdAt:-1,id:-1}).skip(Math.min(100000,Math.max(0,offset))).limit(Math.min(100,Math.max(1,limit))).toArray(),col.countDocuments(filter)]);return {data,pagination:{total,limit,offset}};
 }
 export async function v2db(){if(mode!=='mongodb_v2')throw Error('Set STORAGE_DRIVER=mongodb_v2');return mongoCollection();}

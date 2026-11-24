@@ -1,3 +1,4 @@
+import {initAdminPush} from './services/adminPush.js';
 import {initCustomerAccounts} from './customerAccounts.js';
 import {initOrderPush} from './services/orderPush.js';
 import 'dotenv/config';
@@ -32,5 +33,6 @@ io.on('connection',socket=>{
 await initStorage();
 await initCustomerAccounts();
 await initOrderPush();
+await initAdminPush();
 const port=Number(process.env.PORT||5000);server.listen(port,()=>console.log(`Delta Kebab (${storageMode()}) API: http://localhost:${port}`));
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{io.close();server.close(async()=>{await closeStorage();process.exit(0);});setTimeout(()=>process.exit(1),5000).unref();});

@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import {list} from '../repositories/jsonStore.js';
-export function tokenFor(user) {return jwt.sign({sub:user.id,role:user.role,branchIds:user.branchIds},process.env.JWT_SECRET,{expiresIn:'8h'});}
+export function tokenFor(user) {return jwt.sign({sub:user.id,role:user.role,branchIds:user.branchIds},process.env.JWT_SECRET,{expiresIn:'30d'});}
 export async function auth(req,res,next) {
   const token=req.headers.authorization?.replace(/^Bearer /i,'');
   try {
